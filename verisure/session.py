@@ -6,6 +6,14 @@ from bs4 import BeautifulSoup
 
 import requests
 
+# this import is depending on python version
+try:
+    import HTMLParser
+    UNESCAPE = HTMLParser.HTMLParser().unescape
+except ImportError:
+    import html
+    UNESCAPE = html.unescape
+
 
 DOMAIN = 'https://mypages.verisure.com'
 URL_LOGIN = DOMAIN + '/j_spring_security_check?locale=en_GB'
@@ -50,7 +58,7 @@ class Session(object):
         self._session = None
         self._username = username
         self._password = password
-        self._csrf = ''
+        self.csrf = ''
 
     def login(self):
         """ Login to mypages
@@ -74,7 +82,7 @@ class Session(object):
         status = self.json_to_dict(response.text)
         if not status['status'] == 'ok':
             raise LoginError(status['message'])
-        self._csrf = self._get_csrf()
+        self.csrf = self._get_csrf()
 
     def logout(self):
         """ Ends session
@@ -94,17 +102,35 @@ class Session(object):
         except Exception as e:
             raise Error(e)
         self.validate_response(response)
-        return self.json_to_dict(response.text)
+        return self.json_to_dict(UNESCAPE(response.text))
 
     def post(self, url, data):
-        """ set status of a component """
+        """ send post request """
         self._ensure_session()
         req = requests.Request(
             'POST',
             DOMAIN + url,
             cookies=dict(self._session.cookies),
-            headers={'X-CSRF-TOKEN': self._csrf},
+            headers={'X-CSRF-TOKEN': self.csrf},
             data=data
+            ).prepare()
+        response = self._session.send(
+            req,
+            timeout=RESPONSE_TIMEOUT)
+        self.validate_response(response)
+        return response.text
+
+    def put(self, url, data):
+        """ send put request """
+        self._ensure_session()
+        req = requests.Request(
+            'PUT',
+            DOMAIN + url,
+            cookies=dict(self._session.cookies),
+            headers={
+                'X-CSRF-TOKEN': self.csrf,
+                'content-type': 'application/json'},
+            data=json.dumps(data)
             ).prepare()
         response = self._session.send(
             req,
@@ -128,6 +154,8 @@ class Session(object):
 
     def json_to_dict(self, doc):
         ''' transform json with unicode characters to dict '''
+        if not doc:
+            return ''
         try:
             return json.loads(doc)
         except ValueError as e:
